@@ -1,0 +1,123 @@
+CREATE VIEW [dbo].[SV_FI_S_ALR_87012277]
+AS
+WITH base AS
+(
+    SELECT
+        G.RCLNT,
+        G.BUKRS,
+        G.RACCT,
+        G.RYEAR,
+        G.RBUSA,
+        G.RLDNR,
+        G.RRCTY,
+        G.RVERS,
+        G.RPMAX,
+        G.DRCRK,
+        G.RTCUR,
+        G.HSLVT,
+        G.HSL01,
+        G.HSL02,
+        G.HSL03,
+        G.HSL04,
+        G.HSL05,
+        G.HSL06,
+        G.HSL07,
+        G.HSL08,
+        G.HSL09,
+        G.HSL10,
+        G.HSL11,
+        G.HSL12,
+        G.HSL13,
+        G.HSL14,
+        G.HSL15,
+        G.HSL16
+    FROM dbo.GLT0 G
+    INNER JOIN dbo.SKA1 A
+        ON A.MANDT = G.RCLNT
+       AND A.SAKNR = G.RACCT
+       AND A.KTOPL = 'ETC'
+    INNER JOIN dbo.T001 T
+        ON T.MANDT = G.RCLNT
+       AND T.BUKRS = G.BUKRS
+    WHERE G.RCLNT = '100'
+      --AND G.BUKRS = '0010'
+      --AND G.RYEAR = 2011
+      AND G.RLDNR = '00'
+      AND G.RRCTY = '0'
+      AND G.RVERS = '001'
+      AND G.RPMAX = '016'
+      AND ISNULL(G.RBUSA,'') = ''
+      AND G.RTCUR = 'EUR'
+),
+selected_layer AS
+(
+    SELECT *
+    FROM
+    (
+        SELECT
+            *,
+            ROW_NUMBER() OVER
+            (
+                PARTITION BY RCLNT, BUKRS, RACCT, RYEAR, DRCRK
+                ORDER BY HSLVT ASC
+            ) AS RN
+        FROM base
+    ) X
+    WHERE RN = 1
+),
+agg AS
+(
+    SELECT
+        RCLNT,
+        BUKRS,
+        RACCT,
+        RYEAR,
+        SUM(HSLVT) AS HSLVT,
+
+        SUM(
+            CASE
+                WHEN DRCRK = 'S' THEN
+                    HSL01 + HSL02 + HSL03 + HSL04 +
+                    HSL05 + HSL06 + HSL07 + HSL08 +
+                    HSL09 + HSL10 + HSL11 + HSL12 +
+                    HSL13 + HSL14 + HSL15 + HSL16
+                ELSE 0
+            END
+        ) AS DEBIT,
+
+        SUM(
+            CASE
+                WHEN DRCRK = 'H' THEN
+                    -(HSL01 + HSL02 + HSL03 + HSL04 +
+                      HSL05 + HSL06 + HSL07 + HSL08 +
+                      HSL09 + HSL10 + HSL11 + HSL12 +
+                      HSL13 + HSL14 + HSL15 + HSL16)
+                ELSE 0
+            END
+        ) AS CREDIT
+    FROM selected_layer
+    GROUP BY
+        RCLNT,
+        BUKRS,
+        RACCT,
+        RYEAR
+)
+SELECT
+    A.RCLNT,
+    A.BUKRS,
+    A.RYEAR,
+    A.RACCT,
+    K.TXT20,
+    'EUR' AS RTCUR,
+    A.HSLVT,
+    CAST(0 AS DECIMAL(19,2)) AS HSL_BFWD_PREV,
+    A.DEBIT,
+    A.CREDIT,
+    A.HSLVT + A.DEBIT - A.CREDIT AS HSL_BAL
+FROM agg A
+LEFT JOIN dbo.SKAT K
+    ON K.MANDT = A.RCLNT
+   AND K.SAKNR = A.RACCT
+   AND K.KTOPL = 'ETC'
+   AND K.SPRAS = 'D';
+GO
